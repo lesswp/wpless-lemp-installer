@@ -1,6 +1,7 @@
 #!/bin/bash
 
 LOG_FILE="/var/log/wpless-lemp-installer/sites.log"
+export DEBIAN_FRONTEND=noninteractive
 
 # ────────────────────────────────────────────────────────────
 # 🎨 UI Helpers
@@ -30,9 +31,9 @@ show_banner() {
 # ────────────────────────────────────────────────────────────
 install_lemp_stack() {
     print_info "Updating and installing LEMP stack..."
-    apt update -y >/dev/null && apt upgrade -y >/dev/null
-    apt install nginx mysql-server php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-xmlrpc php-soap php-intl php-zip unzip curl -y >/dev/null
-    apt install certbot python3-certbot-nginx -y >/dev/null
+    apt-get update -y >/dev/null && apt-get upgrade -y >/dev/null
+    apt-get install -y nginx mysql-server php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-xmlrpc php-soap php-intl php-zip unzip curl >/dev/null
+    apt-get install -y certbot python3-certbot-nginx >/dev/null
     print_success "LEMP stack installed."
 }
 
@@ -170,7 +171,8 @@ install_site() {
 
     echo ""
     print_success "✅ WordPress site installed!"
-    print_info "👉 Visit: https://$DOMAIN to complete installation in browser."
+    print_info "👉 Visit: https://$DOMAIN to complete installation in your browser."
+    print_info "📌 You will set site title, email, username, and password there."
 }
 
 # ────────────────────────────────────────────────────────────
