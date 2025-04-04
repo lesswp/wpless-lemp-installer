@@ -1,70 +1,56 @@
 #!/bin/bash
 
-echo "🚨 This will uninstall LEMP, remove all WordPress sites installed via wpless-lemp-installer, and purge MySQL databases."
-read -p "Are you sure you want to continue? (yes/no): " CONFIRM
-[[ "$CONFIRM" != "yes" ]] && echo "❌ Cancelled." && exit 1
+# ────────────────────────────────
+# 🎨 UI Helpers
+# ────────────────────────────────
+print_success() { echo -e "\033[1;32m✔ $1\033[0m"; }
+print_warning() { echo -e "\033[1;33m➜ $1\033[0m"; }
+print_error()   { echo -e "\033[1;31m✖ $1\033[0m"; }
+print_info()    { echo -e "\033[1;36m$1\033[0m"; }
+divider()       { echo -e "\033[1;34m───────────────────────────────────────────────\033[0m"; }
 
-# ─────────────────────────────
-# 💀 Stop Services
-# ─────────────────────────────
-echo "🛑 Stopping services..."
-systemctl stop nginx
-systemctl stop mysql
-systemctl stop php*-fpm
+show_banner() {
+    clear
+    echo -e "\033[1;35m"
+    echo ' __        _______ ____                  _           _           _ '
+    echo ' \ \      / / ____|  _ \   ___ _ __ ___ (_)_ __   __| | ___ _ __| |'
+    echo '  \ \ /\ / /|  _| | |_) | / __|  _ ` _ \| |  _ \ / _` |/ _ \  __| |'
+    echo '   \ V  V / | |___|  __/ | (__| | | | | | | | | | (_| |  __/ |  |_|'
+    echo '    \_/\_/  |_____|_|     \___|_| |_| |_|_|_| |_|\__,_|\___|_|  (_)' 
+    echo -e "\033[0m"
+    divider
+    echo -e "\033[1;36m      WPLess LEMP + WordPress Uninstaller\033[0m"
+    divider
+}
 
-# ─────────────────────────────
-# 🔥 Purge LEMP Packages
-# ─────────────────────────────
-echo "🧹 Purging LEMP stack..."
-apt purge -y nginx nginx-common nginx-full mysql-server mysql-common php* certbot python3-certbot-nginx
-apt autoremove -y
-apt autoclean -y
+# ────────────────────────────────
+# 🔥 Uninstaller Function
+# ────────────────────────────────
+uninstall_stack() {
+    divider
+    print_warning "⚠️  This will remove Nginx, MySQL, PHP, Certbot, all site files and logs!"
+    read -p "Are you sure you want to uninstall everything and reset the system? (y/n): " CONFIRM
+    CONFIRM=${CONFIRM,,} # convert to lowercase
 
-# ─────────────────────────────
-# 📁 Remove WordPress Sites
-# ─────────────────────────────
-echo "🗑 Removing WordPress site files..."
-rm -rf /var/www/*
+    if [[ "$CONFIRM" == "y" || "$CONFIRM" == "yes" ]]; then
+        print_info "Stopping services..."
+        systemctl stop nginx mysql php* >/dev/null 2>&1
 
-# ─────────────────────────────
-# 🔌 Clean NGINX Configs
-# ─────────────────────────────
-echo "🧼 Removing NGINX site configs..."
-rm -rf /etc/nginx/sites-available/*
-rm -rf /etc/nginx/sites-enabled/*
+        print_info "Removing packages..."
+        apt purge --autoremove -y nginx mysql-server php* certbot python3-certbot-nginx >/dev/null
 
-# ─────────────────────────────
-# 🗃 Drop MySQL Databases/Users
-# ─────────────────────────────
-echo "💣 Dropping MySQL databases and users created by WPLess..."
+        print_info "Deleting configuration and data..."
+        rm -rf /etc/nginx /etc/mysql /etc/php /etc/letsencrypt
+        rm -rf /var/www/* /var/log/nginx /var/log/mysql /var/log/wpless-lemp-installer
 
-# Extract DB Names and Users from logs
-LOG_PATH="/var/log/wpless-lemp-installer/sites.log"
-if [[ -f "$LOG_PATH" ]]; then
-    grep -oP '(?<=DB Name: ).*' "$LOG_PATH" | while read -r db; do
-        mysql -e "DROP DATABASE IF EXISTS \`$db\`;"
-        echo "🗑 Dropped database: $db"
-    done
+        print_success "✅ LEMP stack, WordPress sites, and logs removed successfully!"
+    else
+        print_info "❌ Uninstallation cancelled."
+    fi
+}
 
-    grep -oP '(?<=DB User: ).*' "$LOG_PATH" | while read -r user; do
-        mysql -e "DROP USER IF EXISTS '$user'@'localhost';"
-        echo "🗑 Dropped user: $user"
-    done
-fi
-
-# ─────────────────────────────
-# 🧾 Clean WPLess Logs
-# ─────────────────────────────
-echo "🧽 Removing WPLess logs..."
-rm -rf /var/log/wpless-lemp-installer
-
-# ─────────────────────────────
-# 🔄 Reload System Services
-# ─────────────────────────────
-echo "🔁 Reloading system services..."
-systemctl daemon-reexec
-
-# ─────────────────────────────
-# ✅ Done
-# ─────────────────────────────
-echo "✅ Uninstall complete. Your Ubuntu is now LEMP-free and clean!"
+# ────────────────────────────────
+# 🚀 Run Script
+# ────────────────────────────────
+show_banner
+uninstall_stack
