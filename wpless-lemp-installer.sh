@@ -1,39 +1,50 @@
-#!/bin/bash
+# Saving the updated script with all fixes, improvements, and interaction to a file
+script_content = """#!/bin/bash
 
 LOG_FILE="/var/log/wpless-lemp-installer/sites.log"
-export DEBIAN_FRONTEND=noninteractive
 
 # ────────────────────────────────────────────────────────────
 # 🎨 UI Helpers
 # ────────────────────────────────────────────────────────────
-print_success() { echo -e "\033[1;32m✔ $1\033[0m"; }
-print_warning() { echo -e "\033[1;33m➜ $1\033[0m"; }
-print_error()   { echo -e "\033[1;31m✖ $1\033[0m"; }
-print_info()    { echo -e "\033[1;36m$1\033[0m"; }
-divider()       { echo -e "\033[1;34m───────────────────────────────────────────────\033[0m"; }
+print_success() { echo -e "\\033[1;32m✔ $1\\033[0m"; }
+print_warning() { echo -e "\\033[1;33m➜ $1\\033[0m"; }
+print_error()   { echo -e "\\033[1;31m✖ $1\\033[0m"; }
+print_info()    { echo -e "\\033[1;36m$1\\033[0m"; }
+divider()       { echo -e "\\033[1;34m───────────────────────────────────────────────\\033[0m"; }
 
 show_banner() {
     clear
-    echo -e "\033[1;35m"
+    echo -e "\\033[1;35m"
     echo ' __        _______ ____                  _           _           _ '
-    echo ' \ \      / / ____|  _ \   ___ _ __ ___ (_)_ __   __| | ___ _ __| |'
-    echo '  \ \ /\ / /|  _| | |_) | / __|  _ ` _ \| |  _ \ / _` |/ _ \  __| |'
-    echo '   \ V  V / | |___|  __/ | (__| | | | | | | | | | (_| |  __/ |  |_|'
-    echo '    \_/\_/  |_____|_|     \___|_| |_| |_|_|_| |_|\__,_|\___|_|  (_)\033[0m'
+    echo ' \\ \\      / / ____|  _ \\   ___ _ __ ___ (_)_ __   __| | ___ _ __| |'
+    echo '  \\ \\ /\\ / /|  _| | |_) | / __|  _ ` _ \\| |  _ \\ / _` |/ _ \\  __| |'
+    echo '   \\ V  V / | |___|  __/ | (__| | | | | | | | | | (_| |  __/ |  |_|'
+    echo '    \\_/\\_/  |_____|_|     \\___|_| |_| |_|_|_| |_|\\__,_|\\___|_|  (_)\\033[0m'
     divider
-    echo -e "\033[1;36m         WPLess LEMP + WordPress Installer\033[0m"
+    echo -e "\\033[1;36m         WPLess LEMP + WordPress Installer\\033[0m"
     divider
 }
-
 
 # ────────────────────────────────────────────────────────────
 # 🔧 LEMP Stack Installation
 # ────────────────────────────────────────────────────────────
 install_lemp_stack() {
-    print_info "Updating and installing LEMP stack..."
-    apt-get update -y >/dev/null && apt-get upgrade -y >/dev/null
-    apt-get install -y nginx mysql-server php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-xmlrpc php-soap php-intl php-zip unzip curl >/dev/null
-    apt-get install -y certbot python3-certbot-nginx >/dev/null
+    print_info "Checking for package manager lock..."
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+        print_warning "Waiting for other apt process to finish..."
+        sleep 5
+    done
+
+    print_info "Installing LEMP stack..."
+    apt update -y && apt upgrade -y
+    apt install -y nginx mysql-server php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-xmlrpc php-soap php-intl php-zip unzip curl
+    apt install -y certbot python3-certbot-nginx
+
+    if ! command -v nginx >/dev/null || ! command -v mysql >/dev/null; then
+        print_error "LEMP installation failed. Please check your apt logs."
+        exit 1
+    fi
+
     print_success "LEMP stack installed."
 }
 
@@ -57,6 +68,7 @@ create_database() {
 # 🌐 NGINX Configuration
 # ────────────────────────────────────────────────────────────
 configure_nginx() {
+    mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
     cat > /etc/nginx/sites-available/$DOMAIN <<EOF
 server {
     listen 80;
@@ -66,15 +78,15 @@ server {
     index index.php index.html;
 
     location / {
-        try_files \$uri \$uri/ /index.php?\$args;
+        try_files \\$uri \\$uri/ /index.php?\\$args;
     }
 
-    location ~ \.php\$ {
+    location ~ \\.php\$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm.sock;
+        fastcgi_pass unix:/run/php/php\$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm.sock;
     }
 
-    location ~ /\.ht {
+    location ~ /\\.ht {
         deny all;
     }
 }
@@ -143,8 +155,6 @@ log_site_config() {
     {
         echo "Site: $DOMAIN"
         echo "Directory: $WP_DIR"
-        echo "Database Name: $DB_NAME"
-        echo "Database User: $DB_USER"
         echo "Date: $(date)"
         echo "----------------------------"
     } >> "$LOG_FILE"
@@ -154,7 +164,11 @@ log_site_config() {
 # 🚀 Install Flow
 # ────────────────────────────────────────────────────────────
 install_site() {
-    read -p "Enter domain name (e.g. example.com): " DOMAIN
+    while true; do
+        read -p "Enter domain name (e.g. example.com): " DOMAIN
+        [[ -z "$DOMAIN" ]] && print_error "Domain cannot be empty!" || break
+    done
+
     WP_DIR="/var/www/$DOMAIN"
     generate_db_creds
     create_database
@@ -171,8 +185,7 @@ install_site() {
 
     echo ""
     print_success "✅ WordPress site installed!"
-    print_info "👉 Visit: https://$DOMAIN to complete installation in your browser."
-    print_info "📌 You will set site title, email, username, and password there."
+    print_info "👉 Visit: https://$DOMAIN to complete installation in browser."
 }
 
 # ────────────────────────────────────────────────────────────
@@ -195,3 +208,9 @@ main() {
 }
 
 main
+"""
+
+with open("/mnt/data/wpless-lemp-installer.sh", "w") as f:
+    f.write(script_content)
+
+"/mnt/data/wpless-lemp-installer.sh"
