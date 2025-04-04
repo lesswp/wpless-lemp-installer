@@ -33,6 +33,14 @@ install_lemp_stack() {
     apt update -y >/dev/null && apt upgrade -y >/dev/null
     apt install nginx mysql-server php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-xmlrpc php-soap php-intl php-zip unzip curl -y >/dev/null
     apt install certbot python3-certbot-nginx -y >/dev/null
+
+    # Modify php.ini values
+    PHP_INI=$(php --ini | grep "Loaded Configuration" | awk '{print $4}')
+    sed -i 's/^upload_max_filesize = .*/upload_max_filesize = 256M/' "$PHP_INI"
+    sed -i 's/^post_max_size = .*/post_max_size = 256M/' "$PHP_INI"
+    sed -i 's/^memory_limit = .*/memory_limit = 256M/' "$PHP_INI"
+    systemctl restart php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm
+
     print_success "LEMP stack installed."
 }
 
@@ -136,7 +144,7 @@ generate_ssl() {
     
     if [[ $? -ne 0 ]]; then
         print_warning "SSL installation failed for $DOMAIN"
-        echo "❗ Domain verification failed. Most likely due to missing or incorrect DNS records."
+        echo "❗ Domain verification failed. Likely due to DNS issues."
 
         read -p "Would you like to retry SSL installation (after fixing DNS)? (y/n): " RETRY_SSL
         if [[ "$RETRY_SSL" == "y" ]]; then
@@ -155,7 +163,6 @@ generate_ssl() {
         print_success "✅ SSL certificate installed for $DOMAIN"
     fi
 }
-
 
 # ────────────────────────────────
 # 📝 Log Site Details
