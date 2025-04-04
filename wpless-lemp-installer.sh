@@ -130,9 +130,32 @@ check_dns() {
 # 🔐 SSL Setup
 # ────────────────────────────────
 generate_ssl() {
-    certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos -m admin@$DOMAIN
-    print_success "SSL certificate installed for $DOMAIN"
+    print_info "Attempting SSL certificate installation for $DOMAIN..."
+    
+    certbot --nginx -d "$DOMAIN" -d "www.$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN"
+    
+    if [[ $? -ne 0 ]]; then
+        print_warning "SSL installation failed for $DOMAIN"
+        echo "❗ Domain verification failed. Most likely due to missing or incorrect DNS records."
+
+        read -p "Would you like to retry SSL installation (after fixing DNS)? (y/n): " RETRY_SSL
+        if [[ "$RETRY_SSL" == "y" ]]; then
+            print_info "Re-running Certbot for $DOMAIN (without www)..."
+            certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN"
+
+            if [[ $? -ne 0 ]]; then
+                print_error "❌ SSL installation failed again. You can manually retry with: certbot --nginx -d $DOMAIN"
+            else
+                print_success "✅ SSL certificate installed for $DOMAIN"
+            fi
+        else
+            print_warning "⚠️ Skipping SSL installation. You can run this later: certbot --nginx -d $DOMAIN"
+        fi
+    else
+        print_success "✅ SSL certificate installed for $DOMAIN"
+    fi
 }
+
 
 # ────────────────────────────────
 # 📝 Log Site Details
