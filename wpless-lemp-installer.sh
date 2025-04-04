@@ -105,15 +105,25 @@ install_wordpress() {
     chmod -R 755 $WP_DIR
 
     cp $WP_DIR/wp-config-sample.php $WP_DIR/wp-config.php
-    sed -i "s/database_name_here/$DB_NAME/" $WP_DIR/wp-config.php
-    sed -i "s/username_here/$DB_USER/" $WP_DIR/wp-config.php
-    sed -i "s/password_here/$DB_PASS/" $WP_DIR/wp-config.php
 
+    # Debug: show credentials being inserted
+    echo "⚙️  Setting DB credentials:"
+    echo "   DB_NAME = $DB_NAME"
+    echo "   DB_USER = $DB_USER"
+    echo "   DB_PASS = $DB_PASS"
+
+    # Replace with safe delimiter
+    sed -i "s|database_name_here|$DB_NAME|" $WP_DIR/wp-config.php
+    sed -i "s|username_here|$DB_USER|" $WP_DIR/wp-config.php
+    sed -i "s|password_here|$DB_PASS|" $WP_DIR/wp-config.php
+
+    # Add salt keys
     SALT=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/)
     echo "$SALT" >> $WP_DIR/wp-config.php
 
     print_success "WordPress downloaded and configured."
 }
+
 
 # ────────────────────────────────
 # 🔎 DNS Check
