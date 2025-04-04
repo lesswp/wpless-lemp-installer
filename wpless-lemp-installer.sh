@@ -34,12 +34,12 @@ install_lemp_stack() {
     apt install nginx mysql-server php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-xmlrpc php-soap php-intl php-zip unzip curl -y >/dev/null
     apt install certbot python3-certbot-nginx -y >/dev/null
 
-    # Modify php.ini values
-    PHP_INI=$(php --ini | grep "Loaded Configuration" | awk '{print $4}')
-    sed -i 's/^upload_max_filesize = .*/upload_max_filesize = 256M/' "$PHP_INI"
-    sed -i 's/^post_max_size = .*/post_max_size = 256M/' "$PHP_INI"
-    sed -i 's/^memory_limit = .*/memory_limit = 256M/' "$PHP_INI"
-    systemctl restart php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm
+    # PHP config bump
+    PHP_INI=$(php -i | grep 'Loaded Configuration File' | awk '{print $5}')
+    sed -i "s/upload_max_filesize = .*/upload_max_filesize = 256M/" "$PHP_INI"
+    sed -i "s/post_max_size = .*/post_max_size = 256M/" "$PHP_INI"
+    sed -i "s/memory_limit = .*/memory_limit = 256M/" "$PHP_INI"
+    systemctl reload php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm
 
     print_success "LEMP stack installed."
 }
@@ -105,25 +105,19 @@ install_wordpress() {
     chmod -R 755 $WP_DIR
 
     cp $WP_DIR/wp-config-sample.php $WP_DIR/wp-config.php
+    sed -i "s/database_name_here/$DB_NAME/" $WP_DIR/wp-config.php
+    sed -i "s/username_here/$DB_USER/" $WP_DIR/wp-config.php
+    sed -i "s/password_here/$DB_PASS/" $WP_DIR/wp-config.php
 
-    # Debug: show credentials being inserted
-    echo "⚙️  Setting DB credentials:"
-    echo "   DB_NAME = $DB_NAME"
-    echo "   DB_USER = $DB_USER"
-    echo "   DB_PASS = $DB_PASS"
-
-    # Replace with safe delimiter
-    sed -i "s|database_name_here|$DB_NAME|" $WP_DIR/wp-config.php
-    sed -i "s|username_here|$DB_USER|" $WP_DIR/wp-config.php
-    sed -i "s|password_here|$DB_PASS|" $WP_DIR/wp-config.php
-
-    # Add salt keys
     SALT=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/)
     echo "$SALT" >> $WP_DIR/wp-config.php
 
     print_success "WordPress downloaded and configured."
+    echo -e "\n🔐 DB Credentials for $DOMAIN:"
+    echo "  DB Name: $DB_NAME"
+    echo "  DB User: $DB_USER"
+    echo "  DB Pass: $DB_PASS"
 }
-
 
 # ────────────────────────────────
 # 🔎 DNS Check
@@ -154,20 +148,12 @@ generate_ssl() {
     
     if [[ $? -ne 0 ]]; then
         print_warning "SSL installation failed for $DOMAIN"
-        echo "❗ Domain verification failed. Likely due to DNS issues."
-
         read -p "Would you like to retry SSL installation (after fixing DNS)? (y/n): " RETRY_SSL
         if [[ "$RETRY_SSL" == "y" ]]; then
-            print_info "Re-running Certbot for $DOMAIN (without www)..."
             certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN"
-
-            if [[ $? -ne 0 ]]; then
-                print_error "❌ SSL installation failed again. You can manually retry with: certbot --nginx -d $DOMAIN"
-            else
-                print_success "✅ SSL certificate installed for $DOMAIN"
-            fi
+            [[ $? -ne 0 ]] && print_error "❌ SSL still failed." || print_success "✅ SSL installed after retry."
         else
-            print_warning "⚠️ Skipping SSL installation. You can run this later: certbot --nginx -d $DOMAIN"
+            print_warning "⚠️ Skipping SSL installation. You can run: certbot --nginx -d $DOMAIN"
         fi
     else
         print_success "✅ SSL certificate installed for $DOMAIN"
@@ -175,15 +161,13 @@ generate_ssl() {
 }
 
 # ────────────────────────────────
-# 📝 Log Site Details
+# 📝 Log Site Details (no creds)
 # ────────────────────────────────
 log_site_config() {
     mkdir -p "$(dirname "$LOG_FILE")"
     {
         echo "Site: $DOMAIN"
         echo "Directory: $WP_DIR"
-        echo "Database Name: $DB_NAME"
-        echo "Database User: $DB_USER"
         echo "Date: $(date)"
         echo "----------------------------"
     } >> "$LOG_FILE"
