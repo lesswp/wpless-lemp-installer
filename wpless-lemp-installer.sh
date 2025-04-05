@@ -103,7 +103,7 @@ generate_db() {
   mysql -e "CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';"
   mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
   mysql -e "FLUSH PRIVILEGES;"
-  print_success "Database created: $DB_NAME"
+  print_success "Database created."
 }
 
 install_wordpress() {
@@ -129,7 +129,7 @@ server {
   index index.php index.html;
 
   location / {
-    try_files \$uri \$uri/ /index.php?$args;
+    try_files \$uri \$uri/ /index.php?\$args;
   }
 
   location ~ \.php$ {
@@ -174,32 +174,31 @@ setup_ssl() {
 final_output() {
   divider
   print_success "WordPress site installed at: http://$DOMAIN"
-  print_info "DB Name: $DB_NAME"
-  print_info "DB User: $DB_USER"
-  print_info "DB Pass: $DB_PASS"
   divider
 }
 
-ask_install_another() {
-  read -p "Install another site? (y/n): " again
-  [ "$again" == "y" ] && exec $0
+main_flow() {
+  ask_stack
+  ask_sql
+  ask_php_version
+  ask_upload_limits
+  ask_domain
+
+  install_stack
+  install_php
+  configure_php
+  install_mysql
+  generate_db
+  install_wordpress
+  configure_vhost
+  setup_ssl
+  final_output
 }
 
 # === MAIN ===
 show_banner
-ask_stack
-ask_sql
-ask_php_version
-ask_upload_limits
-ask_domain
-
-install_stack
-install_php
-configure_php
-install_mysql
-generate_db
-install_wordpress
-configure_vhost
-setup_ssl
-final_output
-ask_install_another
+while true; do
+  main_flow
+  read -p "Install another site? (y/n): " again
+  [ "$again" != "y" ] && break
+done
