@@ -1,149 +1,140 @@
 #!/bin/bash
 
-set -e
+# === Styled Output ===
+print_success() { echo -e "\033[1;32m✔ $1\033[0m"; }
+print_warning() { echo -e "\033[1;33m➜ $1\033[0m"; }
+print_error()   { echo -e "\033[1;31m✖ $1\033[0m"; }
+print_info()    { echo -e "\033[1;36m$1\033[0m"; }
+divider()       { echo -e "\033[1;34m───────────────────────────────────────────────\033[0m"; }
 
-function show_banner() {
-cat << "EOF"
-
+# === Banner ===
+show_banner() {
+  echo -e "\033[1;35m"
+  cat << "EOF"
 ██     ██ ██████  ██      ███████ ███████ ███████ 
 ██     ██ ██   ██ ██      ██      ██      ██      
 ██  █  ██ ██████  ██      █████   ███████ ███████ 
 ██ ███ ██ ██      ██      ██           ██      ██ 
  ███ ███  ██      ███████ ███████ ███████ ███████ 
-
-         🚀 WPLess WP Installer 🚀
-
 EOF
+  echo -e "\033[1;36m         🚀 WPLess WP Installer 🚀\033[0m"
+  divider
 }
 
-
-# === Helper: show progress ===
-function show_progress() {
-  echo -ne "$1\r"
-  sleep 0.5
-}
-
-# === Ask user for options ===
-function ask_stack() {
-  echo "Choose stack:"
-  select opt in "LEMP (Nginx)" "LAMP (Apache)"; do
+# === Prompt Functions ===
+ask_stack() {
+  echo "Choose your stack:"
+  select stack in "LEMP (Nginx)" "LAMP (Apache)"; do
     case $REPLY in
-      1) STACK="LEMP"; break ;;
-      2) STACK="LAMP"; break ;;
+      1) STACK="lemp"; break;;
+      2) STACK="lamp"; break;;
+      *) print_warning "Invalid option.";;
     esac
   done
 }
 
-function ask_sql() {
-  echo "Choose database:"
-  select opt in "MySQL" "MariaDB"; do
+ask_sql() {
+  echo "Choose your database engine:"
+  select sql in "MySQL" "MariaDB"; do
     case $REPLY in
-      1) SQL_SERVER="MySQL"; break ;;
-      2) SQL_SERVER="MariaDB"; break ;;
+      1) SQL="mysql"; break;;
+      2) SQL="mariadb"; break;;
+      *) print_warning "Invalid option.";;
     esac
   done
 }
 
-function ask_php_version() {
+ask_php_version() {
   echo "Choose PHP version:"
-  select opt in "7.4" "8.0" "8.1" "8.2"; do
-    PHP_VERSION="$opt"
+  select php in "8.2" "8.1" "8.0"; do
+    PHP_VERSION=$php
     break
   done
 }
 
-function ask_upload_limits() {
-  read -p "Enter upload_max_filesize (default 64M): " PHP_UPLOAD
-  PHP_UPLOAD=${PHP_UPLOAD:-64M}
-  read -p "Enter memory_limit (default 256M): " PHP_MEMORY
-  PHP_MEMORY=${PHP_MEMORY:-256M}
+ask_upload_limits() {
+  read -p "Set PHP upload_max_filesize (e.g., 256M): " PHP_UPLOAD
+  read -p "Set PHP memory_limit (e.g., 256M): " PHP_MEMORY
 }
 
-function ask_domain() {
-  read -p "Enter domain or subdomain (e.g. site.com or blog.site.com): " DOMAIN
-  DOMAIN_DIR="/var/www/$DOMAIN"
-  sudo mkdir -p "$DOMAIN_DIR"
+ask_domain() {
+  read -p "Enter your domain (e.g., example.com): " DOMAIN
+  SITE_DIR="/var/www/$DOMAIN"
 }
 
-# === Installation: Web server ===
-function install_stack() {
-  sudo apt update
-  if [[ $STACK == "LEMP" ]]; then
-    sudo apt install -y nginx
+# === Installation Functions ===
+install_stack() {
+  print_info "Installing packages..."
+  apt update
+  if [ "$STACK" == "lemp" ]; then
+    apt install -y nginx
   else
-    sudo apt install -y apache2
+    apt install -y apache2
   fi
-  show_progress "✅ Web server installed."
 }
 
-# === Installation: PHP ===
-function install_php() {
-  sudo apt install -y software-properties-common
-  sudo add-apt-repository -y ppa:ondrej/php
-  sudo apt update
-  sudo apt install -y php$PHP_VERSION php${PHP_VERSION}-fpm php${PHP_VERSION}-mysql
-  show_progress "✅ PHP $PHP_VERSION installed."
+install_php() {
+  add-apt-repository ppa:ondrej/php -y && apt update
+  apt install -y php$PHP_VERSION php$PHP_VERSION-{fpm,mysql,cli,common,xml,gd,curl,mbstring,zip}
 }
 
-function configure_php() {
-  PHP_INI=$(php -i | grep 'Loaded Configuration File' | awk '{print $5}')
-  sudo sed -i "s/upload_max_filesize = .*/upload_max_filesize = $PHP_UPLOAD/" "$PHP_INI"
-  sudo sed -i "s/memory_limit = .*/memory_limit = $PHP_MEMORY/" "$PHP_INI"
-  show_progress "✅ PHP limits configured."
+configure_php() {
+  ini_file=$(php -i | grep "Loaded Configuration File" | awk '{print $5}')
+  sed -i "s/upload_max_filesize = .*/upload_max_filesize = $PHP_UPLOAD/" $ini_file
+  sed -i "s/memory_limit = .*/memory_limit = $PHP_MEMORY/" $ini_file
+  print_success "PHP limits configured."
 }
 
-# === Installation: Database ===
-function install_mysql() {
-  if [[ $SQL_SERVER == "MariaDB" ]]; then
-    sudo apt install -y mariadb-server
+install_mysql() {
+  if [ "$SQL" == "mysql" ]; then
+    apt install -y mysql-server
   else
-    sudo apt install -y mysql-server
+    apt install -y mariadb-server
   fi
-  sudo systemctl enable mysql
-  sudo systemctl start mysql
-  show_progress "✅ Database installed."
+  systemctl start mysql
+  systemctl enable mysql
 }
 
-function generate_db() {
-  DB_NAME="wp_$(openssl rand -hex 3)"
-  DB_USER="user_$(openssl rand -hex 2)"
+generate_db() {
+  DB_NAME=$(openssl rand -hex 4)
+  DB_USER=$(openssl rand -hex 4)
   DB_PASS=$(openssl rand -hex 8)
-  sudo mysql -e "CREATE DATABASE $DB_NAME;"
-  sudo mysql -e "CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';"
-  sudo mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
-  show_progress "✅ DB: $DB_NAME, User: $DB_USER created."
+  mysql -e "CREATE DATABASE $DB_NAME;"
+  mysql -e "CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';"
+  mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
+  mysql -e "FLUSH PRIVILEGES;"
+  print_success "Database created: $DB_NAME"
 }
 
-# === WordPress Setup ===
-function install_wordpress() {
-  cd "$DOMAIN_DIR"
-  sudo wget -q https://wordpress.org/latest.tar.gz
-  sudo tar -xzf latest.tar.gz --strip-components=1
-  sudo rm latest.tar.gz
-  sudo cp wp-config-sample.php wp-config.php
-  sudo sed -i "s/database_name_here/$DB_NAME/" wp-config.php
-  sudo sed -i "s/username_here/$DB_USER/" wp-config.php
-  sudo sed -i "s/password_here/$DB_PASS/" wp-config.php
-  show_progress "✅ WordPress installed at $DOMAIN_DIR."
+install_wordpress() {
+  mkdir -p $SITE_DIR
+  cd /tmp && curl -O https://wordpress.org/latest.tar.gz
+  tar -xzf latest.tar.gz
+  cp -r wordpress/* $SITE_DIR
+  chown -R www-data:www-data $SITE_DIR
+  cp $SITE_DIR/wp-config-sample.php $SITE_DIR/wp-config.php
+  sed -i "s/database_name_here/$DB_NAME/" $SITE_DIR/wp-config.php
+  sed -i "s/username_here/$DB_USER/" $SITE_DIR/wp-config.php
+  sed -i "s/password_here/$DB_PASS/" $SITE_DIR/wp-config.php
+  print_success "WordPress installed at $SITE_DIR"
 }
 
-# === Nginx or Apache Configuration ===
-function configure_vhost() {
-  if [[ $STACK == "LEMP" ]]; then
-    cat <<EOF | sudo tee /etc/nginx/sites-available/$DOMAIN > /dev/null
+configure_vhost() {
+  if [ "$STACK" == "lemp" ]; then
+    cat > /etc/nginx/sites-available/$DOMAIN <<EOF
 server {
   listen 80;
   server_name $DOMAIN;
-  root $DOMAIN_DIR;
-
+  root $SITE_DIR;
   index index.php index.html;
+
   location / {
-    try_files \$uri \$uri/ /index.php?\$args;
+    try_files \$uri \$uri/ /index.php?$args;
   }
 
-  location ~ \.php\$ {
+  location ~ \.php$ {
     include snippets/fastcgi-php.conf;
-    fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
+    fastcgi_pass unix:/run/php/php$PHP_VERSION-fpm.sock;
   }
 
   location ~ /\.ht {
@@ -151,69 +142,47 @@ server {
   }
 }
 EOF
-    sudo ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/
-    sudo nginx -t && sudo systemctl reload nginx
+    ln -s /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/
+    nginx -t && systemctl reload nginx
   else
-    cat <<EOF | sudo tee /etc/apache2/sites-available/$DOMAIN.conf > /dev/null
+    cat > /etc/apache2/sites-available/$DOMAIN.conf <<EOF
 <VirtualHost *:80>
-    ServerName $DOMAIN
-    DocumentRoot $DOMAIN_DIR
-
-    <Directory $DOMAIN_DIR>
-        AllowOverride All
-        Require all granted
-    </Directory>
-
-    ErrorLog \${APACHE_LOG_DIR}/$DOMAIN-error.log
-    CustomLog \${APACHE_LOG_DIR}/$DOMAIN-access.log combined
+  ServerName $DOMAIN
+  DocumentRoot $SITE_DIR
+  <Directory $SITE_DIR>
+    AllowOverride All
+    Require all granted
+  </Directory>
 </VirtualHost>
 EOF
-    sudo a2ensite $DOMAIN.conf
-    sudo systemctl reload apache2
+    a2ensite $DOMAIN.conf
+    a2enmod rewrite
+    systemctl reload apache2
   fi
-  show_progress "✅ Virtual host configured."
+  print_success "Vhost configured."
 }
 
-# === SSL with retry ===
-function setup_ssl() {
-  sudo apt install -y certbot python3-certbot-${STACK,,}
-  if [[ $STACK == "LEMP" ]]; then
-    sudo certbot --nginx -d $DOMAIN || retry_ssl
-  else
-    sudo certbot --apache -d $DOMAIN || retry_ssl
-  fi
+setup_ssl() {
+  if ! command -v certbot >/dev/null; then apt install -y certbot python3-certbot-${STACK}; fi
+  certbot --$STACK -d $DOMAIN --non-interactive --agree-tos -m admin@$DOMAIN || {
+    print_error "SSL failed. Retry? (y/n)"
+    read retry
+    [ "$retry" == "y" ] && certbot --$STACK -d $DOMAIN --non-interactive --agree-tos -m admin@$DOMAIN
+  }
 }
 
-function retry_ssl() {
-  read -p "⚠️ SSL failed. Retry? [y/n]: " retry
-  if [[ "$retry" == "y" ]]; then
-    setup_ssl
-  else
-    echo "⚠️ Skipping SSL."
-  fi
+final_output() {
+  divider
+  print_success "WordPress site installed at: http://$DOMAIN"
+  print_info "DB Name: $DB_NAME"
+  print_info "DB User: $DB_USER"
+  print_info "DB Pass: $DB_PASS"
+  divider
 }
 
-# === Summary ===
-function final_output() {
-  echo ""
-  echo "🎉 WordPress site installed!"
-  echo "URL: http://$DOMAIN"
-  echo "DB Name: $DB_NAME"
-  echo "DB User: $DB_USER"
-  echo "DB Pass: $DB_PASS"
-  echo ""
-}
-
-# === Ask to Install Another ===
-function ask_install_another() {
-  read -p "Do you want to install another WordPress site? (y/n): " again
-  if [[ "$again" == "y" ]]; then
-    bash "$0"
-    exit 0
-  else
-    echo "🚀 Done!"
-    exit 0
-  fi
+ask_install_another() {
+  read -p "Install another site? (y/n): " again
+  [ "$again" == "y" ] && exec $0
 }
 
 # === MAIN ===
