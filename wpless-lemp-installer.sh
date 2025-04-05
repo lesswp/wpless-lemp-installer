@@ -1,219 +1,236 @@
 #!/bin/bash
 
-LOG_FILE="/var/log/wpless-lemp-installer/sites.log"
+set -e
 
-# ────────────────────────────────
-# 🎨 UI Helpers
-# ────────────────────────────────
-print_success() { echo -e "\033[1;32m✔ $1\033[0m"; }
-print_warning() { echo -e "\033[1;33m➜ $1\033[0m"; }
-print_error()   { echo -e "\033[1;31m✖ $1\033[0m"; }
-print_info()    { echo -e "\033[1;36m$1\033[0m"; }
-divider()       { echo -e "\033[1;34m───────────────────────────────────────────────\033[0m"; }
+function show_banner() {
+cat << "EOF"
 
-show_banner() {
-    clear
-    echo -e "\033[1;35m"
-    echo ' __        _______ ____                  _           _           _ '
-    echo ' \ \      / / ____|  _ \   ___ _ __ ___ (_)_ __   __| | ___ _ __| |'
-    echo '  \ \ /\ / /|  _| | |_) | / __|  _ ` _ \| |  _ \ / _` |/ _ \  __| |'
-    echo '   \ V  V / | |___|  __/ | (__| | | | | | | | | | (_| |  __/ |  |_|'
-    echo '    \_/\_/  |_____|_|     \___|_| |_| |_|_|_| |_|\__,_|\___|_|  (_)' 
-    echo -e "\033[0m"
-    divider
-    echo -e "\033[1;36m         WPLess LEMP + WordPress Installer\033[0m"
-    divider
+██     ██ ██████  ██      ███████ ███████ ███████ 
+██     ██ ██   ██ ██      ██      ██      ██      
+██  █  ██ ██████  ██      █████   ███████ ███████ 
+██ ███ ██ ██      ██      ██           ██      ██ 
+ ███ ███  ██      ███████ ███████ ███████ ███████ 
+
+         🚀 WPLess WP Installer 🚀
+
+EOF
 }
 
-# ────────────────────────────────
-# 🔧 Install LEMP Stack
-# ────────────────────────────────
-install_lemp_stack() {
-    print_info "Updating and installing LEMP stack..."
-    apt update -y >/dev/null && apt upgrade -y >/dev/null
-    apt install nginx mysql-server php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-xmlrpc php-soap php-intl php-zip unzip curl -y >/dev/null
-    apt install certbot python3-certbot-nginx -y >/dev/null
 
-    # PHP config bump
-    PHP_INI=$(php -i | grep 'Loaded Configuration File' | awk '{print $5}')
-    sed -i "s/upload_max_filesize = .*/upload_max_filesize = 256M/" "$PHP_INI"
-    sed -i "s/post_max_size = .*/post_max_size = 256M/" "$PHP_INI"
-    sed -i "s/memory_limit = .*/memory_limit = 256M/" "$PHP_INI"
-    systemctl reload php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm
-
-    print_success "LEMP stack installed."
+# === Helper: show progress ===
+function show_progress() {
+  echo -ne "$1\r"
+  sleep 0.5
 }
 
-# ────────────────────────────────
-# 🐬 Database Setup
-# ────────────────────────────────
-generate_db_creds() {
-    DB_NAME="wp_$(openssl rand -hex 4)"
-    DB_USER="user_$(openssl rand -hex 4)"
-    DB_PASS="$(openssl rand -base64 16)"
+# === Ask user for options ===
+function ask_stack() {
+  echo "Choose stack:"
+  select opt in "LEMP (Nginx)" "LAMP (Apache)"; do
+    case $REPLY in
+      1) STACK="LEMP"; break ;;
+      2) STACK="LAMP"; break ;;
+    esac
+  done
 }
 
-create_database() {
-    mysql -e "CREATE DATABASE $DB_NAME DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci;"
-    mysql -e "CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';"
-    mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
-    mysql -e "FLUSH PRIVILEGES;"
+function ask_sql() {
+  echo "Choose database:"
+  select opt in "MySQL" "MariaDB"; do
+    case $REPLY in
+      1) SQL_SERVER="MySQL"; break ;;
+      2) SQL_SERVER="MariaDB"; break ;;
+    esac
+  done
 }
 
-# ────────────────────────────────
-# 🌐 NGINX Config
-# ────────────────────────────────
-configure_nginx() {
-    cat > /etc/nginx/sites-available/$DOMAIN <<EOF
+function ask_php_version() {
+  echo "Choose PHP version:"
+  select opt in "7.4" "8.0" "8.1" "8.2"; do
+    PHP_VERSION="$opt"
+    break
+  done
+}
+
+function ask_upload_limits() {
+  read -p "Enter upload_max_filesize (default 64M): " PHP_UPLOAD
+  PHP_UPLOAD=${PHP_UPLOAD:-64M}
+  read -p "Enter memory_limit (default 256M): " PHP_MEMORY
+  PHP_MEMORY=${PHP_MEMORY:-256M}
+}
+
+function ask_domain() {
+  read -p "Enter domain or subdomain (e.g. site.com or blog.site.com): " DOMAIN
+  DOMAIN_DIR="/var/www/$DOMAIN"
+  sudo mkdir -p "$DOMAIN_DIR"
+}
+
+# === Installation: Web server ===
+function install_stack() {
+  sudo apt update
+  if [[ $STACK == "LEMP" ]]; then
+    sudo apt install -y nginx
+  else
+    sudo apt install -y apache2
+  fi
+  show_progress "✅ Web server installed."
+}
+
+# === Installation: PHP ===
+function install_php() {
+  sudo apt install -y software-properties-common
+  sudo add-apt-repository -y ppa:ondrej/php
+  sudo apt update
+  sudo apt install -y php$PHP_VERSION php${PHP_VERSION}-fpm php${PHP_VERSION}-mysql
+  show_progress "✅ PHP $PHP_VERSION installed."
+}
+
+function configure_php() {
+  PHP_INI=$(php -i | grep 'Loaded Configuration File' | awk '{print $5}')
+  sudo sed -i "s/upload_max_filesize = .*/upload_max_filesize = $PHP_UPLOAD/" "$PHP_INI"
+  sudo sed -i "s/memory_limit = .*/memory_limit = $PHP_MEMORY/" "$PHP_INI"
+  show_progress "✅ PHP limits configured."
+}
+
+# === Installation: Database ===
+function install_mysql() {
+  if [[ $SQL_SERVER == "MariaDB" ]]; then
+    sudo apt install -y mariadb-server
+  else
+    sudo apt install -y mysql-server
+  fi
+  sudo systemctl enable mysql
+  sudo systemctl start mysql
+  show_progress "✅ Database installed."
+}
+
+function generate_db() {
+  DB_NAME="wp_$(openssl rand -hex 3)"
+  DB_USER="user_$(openssl rand -hex 2)"
+  DB_PASS=$(openssl rand -hex 8)
+  sudo mysql -e "CREATE DATABASE $DB_NAME;"
+  sudo mysql -e "CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';"
+  sudo mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
+  show_progress "✅ DB: $DB_NAME, User: $DB_USER created."
+}
+
+# === WordPress Setup ===
+function install_wordpress() {
+  cd "$DOMAIN_DIR"
+  sudo wget -q https://wordpress.org/latest.tar.gz
+  sudo tar -xzf latest.tar.gz --strip-components=1
+  sudo rm latest.tar.gz
+  sudo cp wp-config-sample.php wp-config.php
+  sudo sed -i "s/database_name_here/$DB_NAME/" wp-config.php
+  sudo sed -i "s/username_here/$DB_USER/" wp-config.php
+  sudo sed -i "s/password_here/$DB_PASS/" wp-config.php
+  show_progress "✅ WordPress installed at $DOMAIN_DIR."
+}
+
+# === Nginx or Apache Configuration ===
+function configure_vhost() {
+  if [[ $STACK == "LEMP" ]]; then
+    cat <<EOF | sudo tee /etc/nginx/sites-available/$DOMAIN > /dev/null
 server {
-    listen 80;
-    server_name $DOMAIN www.$DOMAIN;
-    root $WP_DIR;
+  listen 80;
+  server_name $DOMAIN;
+  root $DOMAIN_DIR;
 
-    index index.php index.html;
+  index index.php index.html;
+  location / {
+    try_files \$uri \$uri/ /index.php?\$args;
+  }
 
-    location / {
-        try_files \$uri \$uri/ /index.php?\$args;
-    }
+  location ~ \.php\$ {
+    include snippets/fastcgi-php.conf;
+    fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
+  }
 
-    location ~ \.php\$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm.sock;
-    }
-
-    location ~ /\.ht {
-        deny all;
-    }
+  location ~ /\.ht {
+    deny all;
+  }
 }
 EOF
+    sudo ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/
+    sudo nginx -t && sudo systemctl reload nginx
+  else
+    cat <<EOF | sudo tee /etc/apache2/sites-available/$DOMAIN.conf > /dev/null
+<VirtualHost *:80>
+    ServerName $DOMAIN
+    DocumentRoot $DOMAIN_DIR
 
-    ln -s /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/ 2>/dev/null
-    nginx -t && systemctl reload nginx
-    print_success "Nginx configured for $DOMAIN"
+    <Directory $DOMAIN_DIR>
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog \${APACHE_LOG_DIR}/$DOMAIN-error.log
+    CustomLog \${APACHE_LOG_DIR}/$DOMAIN-access.log combined
+</VirtualHost>
+EOF
+    sudo a2ensite $DOMAIN.conf
+    sudo systemctl reload apache2
+  fi
+  show_progress "✅ Virtual host configured."
 }
 
-# ────────────────────────────────
-# ⚙️ WordPress Setup
-# ────────────────────────────────
-install_wordpress() {
-    mkdir -p $WP_DIR
-    cd /tmp
-    curl -s -O https://wordpress.org/latest.tar.gz
-    tar -xzf latest.tar.gz
-    cp -a wordpress/. $WP_DIR
-    chown -R www-data:www-data $WP_DIR
-    chmod -R 755 $WP_DIR
-
-    cp $WP_DIR/wp-config-sample.php $WP_DIR/wp-config.php
-    sed -i "s/database_name_here/$DB_NAME/" $WP_DIR/wp-config.php
-    sed -i "s/username_here/$DB_USER/" $WP_DIR/wp-config.php
-    sed -i "s/password_here/$DB_PASS/" $WP_DIR/wp-config.php
-
-    SALT=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/)
-    echo "$SALT" >> $WP_DIR/wp-config.php
-
-    print_success "WordPress downloaded and configured."
-    echo -e "\n🔐 DB Credentials for $DOMAIN:"
-    echo "  DB Name: $DB_NAME"
-    echo "  DB User: $DB_USER"
-    echo "  DB Pass: $DB_PASS"
+# === SSL with retry ===
+function setup_ssl() {
+  sudo apt install -y certbot python3-certbot-${STACK,,}
+  if [[ $STACK == "LEMP" ]]; then
+    sudo certbot --nginx -d $DOMAIN || retry_ssl
+  else
+    sudo certbot --apache -d $DOMAIN || retry_ssl
+  fi
 }
 
-# ────────────────────────────────
-# 🔎 DNS Check
-# ────────────────────────────────
-check_dns() {
-    print_info "Checking DNS for $DOMAIN..."
-    SERVER_IP=$(curl -s https://api.ipify.org)
-    DOMAIN_IP=$(dig +short "$DOMAIN" | tail -n1)
-
-    if [[ "$DOMAIN_IP" == "$SERVER_IP" ]]; then
-        print_success "$DOMAIN is pointing to this server [$SERVER_IP]"
-    else
-        print_warning "$DOMAIN does not point to this server!"
-        print_info "→ Your server IP is: $SERVER_IP"
-        print_info "⚠️  Please update DNS A record before SSL generation."
-        read -p "Continue anyway? (y/n): " DNS_CONT
-        [[ "$DNS_CONT" != "y" ]] && return 1
-    fi
+function retry_ssl() {
+  read -p "⚠️ SSL failed. Retry? [y/n]: " retry
+  if [[ "$retry" == "y" ]]; then
+    setup_ssl
+  else
+    echo "⚠️ Skipping SSL."
+  fi
 }
 
-# ────────────────────────────────
-# 🔐 SSL Setup
-# ────────────────────────────────
-generate_ssl() {
-    print_info "Attempting SSL certificate installation for $DOMAIN..."
-    
-    certbot --nginx -d "$DOMAIN" -d "www.$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN"
-    
-    if [[ $? -ne 0 ]]; then
-        print_warning "SSL installation failed for $DOMAIN"
-        read -p "Would you like to retry SSL installation (after fixing DNS)? (y/n): " RETRY_SSL
-        if [[ "$RETRY_SSL" == "y" ]]; then
-            certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN"
-            [[ $? -ne 0 ]] && print_error "❌ SSL still failed." || print_success "✅ SSL installed after retry."
-        else
-            print_warning "⚠️ Skipping SSL installation. You can run: certbot --nginx -d $DOMAIN"
-        fi
-    else
-        print_success "✅ SSL certificate installed for $DOMAIN"
-    fi
+# === Summary ===
+function final_output() {
+  echo ""
+  echo "🎉 WordPress site installed!"
+  echo "URL: http://$DOMAIN"
+  echo "DB Name: $DB_NAME"
+  echo "DB User: $DB_USER"
+  echo "DB Pass: $DB_PASS"
+  echo ""
 }
 
-# ────────────────────────────────
-# 📝 Log Site Details (no creds)
-# ────────────────────────────────
-log_site_config() {
-    mkdir -p "$(dirname "$LOG_FILE")"
-    {
-        echo "Site: $DOMAIN"
-        echo "Directory: $WP_DIR"
-        echo "Date: $(date)"
-        echo "----------------------------"
-    } >> "$LOG_FILE"
+# === Ask to Install Another ===
+function ask_install_another() {
+  read -p "Do you want to install another WordPress site? (y/n): " again
+  if [[ "$again" == "y" ]]; then
+    bash "$0"
+    exit 0
+  else
+    echo "🚀 Done!"
+    exit 0
+  fi
 }
 
-# ────────────────────────────────
-# 🚀 Install One Site
-# ────────────────────────────────
-install_site() {
-    read -p "Enter domain name (e.g. example.com): " DOMAIN
-    WP_DIR="/var/www/$DOMAIN"
-    generate_db_creds
-    create_database
-    install_wordpress
-    configure_nginx
+# === MAIN ===
+show_banner
+ask_stack
+ask_sql
+ask_php_version
+ask_upload_limits
+ask_domain
 
-    if ! check_dns; then
-        print_error "Aborting install for $DOMAIN due to DNS mismatch."
-        return
-    fi
-
-    generate_ssl
-    log_site_config
-
-    echo ""
-    print_success "✅ WordPress site installed!"
-    print_info "👉 Visit: https://$DOMAIN to complete installation in browser."
-}
-
-# ────────────────────────────────
-# 🔁 Loop for Multiple Installs
-# ────────────────────────────────
-main() {
-    show_banner
-    install_lemp_stack
-
-    while true; do
-        divider
-        install_site
-        echo ""
-        read -p "Would you like to install another site? (y/n): " CHOICE
-        [[ "$CHOICE" != "y" ]] && break
-    done
-
-    print_info "📝 All installed sites logged at: $LOG_FILE"
-    print_success "🎉 Done! Enjoy your new WordPress setup!"
-}
-
-main
+install_stack
+install_php
+configure_php
+install_mysql
+generate_db
+install_wordpress
+configure_vhost
+setup_ssl
+final_output
+ask_install_another
